@@ -6,6 +6,12 @@ import time
 import csv
 import io
 
+try:
+    from scholarly import scholarly
+    GOOGLE_SCHOLAR_AVAILABLE = True
+except ImportError:
+    GOOGLE_SCHOLAR_AVAILABLE = False
+
 def search_papers_api(query, limit=20):
     """Semantic Scholar APIを使用して論文を検索する関数"""
     if not query:
@@ -80,7 +86,8 @@ def search_papers_api(query, limit=20):
                         'venue': str(paper.get('venue')) if paper.get('venue') else '掲載誌不明',
                         'citation_count': paper.get('citationCount', 0) or 0,
                         'url': str(paper.get('url')) if paper.get('url') else '',
-                        'publication_date': str(paper.get('publicationDate')) if paper.get('publicationDate') else ''
+                        'publication_date': str(paper.get('publicationDate')) if paper.get('publicationDate') else '',
+                        'source': 'Semantic Scholar'  # データソースを追加
                     }
                     papers.append(processed_paper)
             
@@ -100,6 +107,102 @@ def search_papers_api(query, limit=20):
             return []
     
     return []
+
+def search_google_scholar(query, limit=10):
+    """Google Scholarを使用して論文を検索する関数"""
+    if not GOOGLE_SCHOLAR_AVAILABLE:
+        return []
+    
+    if not query:
+        return []
+    
+    papers = []
+    try:
+        # Google Scholar検索を実行
+        search_query = scholarly.search_pubs(query)
+        
+        count = 0
+        for paper in search_query:
+            if count >= limit:
+                break
+            
+            try:
+                # 論文情報を取得
+                title = paper.get('title', 'タイトル不明')
+                authors = ', '.join([author['name'] for author in paper.get('author', [])]) if paper.get('author') else '著者不明'
+                year = paper.get('year', '年度不明')
+                abstract = paper.get('abstract', '抄録なし')
+                venue = paper.get('venue', '掲載誌不明')
+                citation_count = paper.get('num_citations', 0)
+                url = paper.get('pub_url', '')
+                
+                # 教育関係の論文をフィルタリング
+                title_abstract = (str(title) + ' ' + str(abstract)).lower()
+                education_terms = ['education', 'learning', 'teaching', 'student', 'school', 'classroom', 'pedagogy', 'curriculum', 'instruction']
+                
+                if any(term in title_abstract for term in education_terms):
+                    processed_paper = {
+                        'title': str(title) if title else 'タイトル不明',
+                        'authors': str(authors) if authors else '著者不明',
+                        'year': int(year) if str(year).isdigit() else '年度不明',
+                        'abstract': str(abstract) if abstract else '抄録なし',
+                        'venue': str(venue) if venue else '掲載誌不明',
+                        'citation_count': int(citation_count) if citation_count else 0,
+                        'url': str(url) if url else '',
+                        'publication_date': '',
+                        'source': 'Google Scholar'  # データソースを追加
+                    }
+                    papers.append(processed_paper)
+                    count += 1
+                
+                # レート制限対策
+                time.sleep(2)
+                
+            except Exception as e:
+                st.warning(f"Google Scholar論文処理エラー: {str(e)}")
+                continue
+                
+    except Exception as e:
+        st.error(f"Google Scholar検索エラー: {str(e)}")
+        return []
+    
+    return papers
+
+def search_combined(query, limit_per_source=10):
+    """複数のデータソースから論文を検索して結合する関数"""
+    all_papers = []
+    
+    # Semantic Scholar検索
+    st.info("🔍 Semantic Scholarで検索中...")
+    semantic_papers = search_papers_api(query, limit_per_source)
+    for paper in semantic_papers:
+        paper['source'] = 'Semantic Scholar'
+    all_papers.extend(semantic_papers)
+    
+    # Google Scholar検索（利用可能な場合）
+    if GOOGLE_SCHOLAR_AVAILABLE:
+        st.info("🔍 Google Scholarで検索中...")
+        try:
+            google_papers = search_google_scholar(query, limit_per_source)
+            all_papers.extend(google_papers)
+        except Exception as e:
+            st.warning(f"Google Scholar検索でエラーが発生しました: {str(e)}")
+    else:
+        st.warning("Google Scholar検索は利用できません（scholarlyライブラリが必要）")
+    
+    # 重複除去（タイトルベース）
+    seen_titles = set()
+    unique_papers = []
+    for paper in all_papers:
+        title_lower = paper.get('title', '').lower().strip()
+        if title_lower and title_lower not in seen_titles:
+            seen_titles.add(title_lower)
+            unique_papers.append(paper)
+    
+    # 引用数でソート
+    unique_papers.sort(key=lambda x: x.get('citation_count', 0), reverse=True)
+    
+    return unique_papers
 
 def highlight_text(text, search_terms):
     """検索語をハイライトする関数"""
@@ -219,7 +322,7 @@ def create_csv_data(papers, search_query):
     # ヘッダー行
     headers = [
         'No.', 'title', 'author', 'year', 'journal', 'cites', 
-        'abstract', 'URL', 'APA style', 'search words', 'search date'
+        'abstract', 'URL', 'APA style', 'search words', 'search date', 'data sources'
     ]
     csv_data.append(headers)
     
@@ -238,7 +341,8 @@ def create_csv_data(papers, search_query):
             paper.get('url', ''),
             format_apa_citation(paper),
             search_query,
-            search_datetime
+            search_datetime,
+            paper.get('source', 'Unknown')
         ]
         csv_data.append(row)
     
@@ -279,10 +383,14 @@ def display_paper_with_save(paper, search_query, index):
         title = str(paper.get('title', 'タイトル不明'))
         highlighted_title = highlight_text(title, search_query)
         
+        source = paper.get('source', 'Unknown')
+        source_emoji = "🎓" if source == "Semantic Scholar" else "📚" if source == "Google Scholar" else "🔍"
+        
         # タイトルと保存ボタンを同じ行に配置
         col1, col2 = st.columns([5, 1])
         with col1:
             st.markdown(f"### {index}. {highlighted_title}", unsafe_allow_html=True)
+            st.markdown(f"**{source_emoji} データソース:** {source}")
         with col2:
             # 個別保存ボタン
             save_key = f"save_{index}_{hash(title)}"
@@ -347,8 +455,8 @@ def display_paper_with_save(paper, search_query, index):
 def main():
     # ページ設定
     st.set_page_config(
-        page_title="EduStudy",
-        page_icon="📚",
+        page_title="EduStudy - 教育論文検索システム",
+        page_icon="🎓",
         layout="wide"
     )
     
@@ -375,6 +483,14 @@ def main():
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         margin-bottom: 1rem;
     }
+    .source-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        background: #e3f2fd;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        margin-left: 0.5rem;
+    }
     </style>
     """, unsafe_allow_html=True)
     
@@ -387,8 +503,8 @@ def main():
     # ヘッダー
     st.markdown("""
     <div class="main-header">
-        <h1>📚 EduStudy</h1>
-        <p>世界中の教育関係論文をリアルタイムで検索できます。</p>
+        <h1>🎓 EduStudy - 教育論文検索システム</h1>
+        <p>世界中の教育関係論文をリアルタイムで検索できます。複数のデータベースから最新の研究成果を提供します。</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -396,12 +512,21 @@ def main():
     with st.sidebar:
         st.header("🔍 検索オプション")
         
+        st.subheader("📊 データソース")
+        use_semantic = st.checkbox("Semantic Scholar", value=True, help="200M+の学術論文データベース")
+        use_google = st.checkbox("Google Scholar", value=GOOGLE_SCHOLAR_AVAILABLE, 
+                                disabled=not GOOGLE_SCHOLAR_AVAILABLE,
+                                help="Googleの学術検索エンジン" + ("" if GOOGLE_SCHOLAR_AVAILABLE else " (要scholarly)"))
+        
+        if not GOOGLE_SCHOLAR_AVAILABLE:
+            st.info("💡 Google Scholar検索を有効にするには `pip install scholarly` を実行してください")
+        
         # 検索結果数の設定
         result_limit = st.slider(
-            "検索結果数",
+            "各データソースからの検索結果数",
             min_value=5,
-            max_value=100,
-            value=20,
+            max_value=25,
+            value=10,
             step=5
         )
         
@@ -409,9 +534,9 @@ def main():
         current_year = datetime.now().year
         year_range = st.slider(
             "発行年度範囲",
-            min_value=1950,
+            min_value=2000,
             max_value=current_year,
-            value=(2025, current_year),
+            value=(2020, current_year),
             step=1
         )
         
@@ -423,16 +548,16 @@ def main():
             st.success(f"保存済み: {len(st.session_state.saved_papers)}件")
             
             # CSVダウンロードボタン
-            if st.button("📥 Download for CSV file", use_container_width=True):
+            if st.button("📥 CSV形式でダウンロード", use_container_width=True):
                 csv_content = create_csv_download(
                     st.session_state.saved_papers, 
                     st.session_state.last_search_query
                 )
                 
-                filename = f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                filename = f"論文検索結果_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
                 
                 st.download_button(
-                    label="📄 Download for CSV file",
+                    label="📄 CSVファイルをダウンロード",
                     data=csv_content,
                     file_name=filename,
                     mime="text/csv",
@@ -440,13 +565,13 @@ def main():
                 )
             
             # BibTeXダウンロードボタン
-            if st.button("📚 Download for BibTeX file", use_container_width=True):
+            if st.button("📚 BibTeX形式でダウンロード", use_container_width=True):
                 bibtex_content = create_bibtex_data(st.session_state.saved_papers)
                 
                 filename = f"論文検索結果_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bib"
                 
                 st.download_button(
-                    label="📖 Download for BibTeX file",
+                    label="📖 BibTeXファイルをダウンロード",
                     data=bibtex_content,
                     file_name=filename,
                     mime="text/plain",
@@ -479,9 +604,12 @@ def main():
         
         st.markdown("---")
         st.markdown("**📊 データソース:**")
-        st.markdown("- Semantic Scholar API")
-        st.markdown("- 200M+ 学術論文データベース")
-        st.markdown("- リアルタイム更新")
+        if use_semantic:
+            st.markdown("- ✅ Semantic Scholar API")
+        if use_google and GOOGLE_SCHOLAR_AVAILABLE:
+            st.markdown("- ✅ Google Scholar")
+        if not use_semantic and not (use_google and GOOGLE_SCHOLAR_AVAILABLE):
+            st.markdown("- ❌ データソースが選択されていません")
     
     # メイン検索エリア
     st.markdown('<div class="search-box">', unsafe_allow_html=True)
@@ -502,6 +630,11 @@ def main():
     
     # 検索実行
     if search_query and (search_button or search_query):
+        # データソースチェック
+        if not use_semantic and not (use_google and GOOGLE_SCHOLAR_AVAILABLE):
+            st.error("❌ 検索するデータソースを選択してください")
+            return
+        
         # 検索クエリを保存
         st.session_state.last_search_query = search_query
         
@@ -510,12 +643,38 @@ def main():
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            status_text.text("Semantic Scholar APIに接続中...")
-            progress_bar.progress(25)
+            results = []
             
-            # API検索実行
-            results = search_papers_api(search_query, result_limit)
-            progress_bar.progress(75)
+            if use_semantic:
+                status_text.text("Semantic Scholar APIに接続中...")
+                progress_bar.progress(25)
+                semantic_results = search_papers_api(search_query, result_limit)
+                for paper in semantic_results:
+                    paper['source'] = 'Semantic Scholar'
+                results.extend(semantic_results)
+                progress_bar.progress(50)
+            
+            if use_google and GOOGLE_SCHOLAR_AVAILABLE:
+                status_text.text("Google Scholarに接続中...")
+                progress_bar.progress(75)
+                try:
+                    google_results = search_google_scholar(search_query, result_limit)
+                    results.extend(google_results)
+                except Exception as e:
+                    st.warning(f"Google Scholar検索でエラーが発生しました: {str(e)}")
+            
+            # 重複除去とソート
+            seen_titles = set()
+            unique_results = []
+            for paper in results:
+                title_lower = paper.get('title', '').lower().strip()
+                if title_lower and title_lower not in seen_titles:
+                    seen_titles.add(title_lower)
+                    unique_results.append(paper)
+            
+            # 引用数でソート
+            unique_results.sort(key=lambda x: x.get('citation_count', 0), reverse=True)
+            results = unique_results
             
             # 年度フィルタリング
             if results:
@@ -537,6 +696,22 @@ def main():
         st.markdown(f"## 📊 検索結果: {len(results)}件")
         
         if results:
+            source_counts = {}
+            for paper in results:
+                source = paper.get('source', 'Unknown')
+                source_counts[source] = source_counts.get(source, 0) + 1
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                semantic_count = source_counts.get('Semantic Scholar', 0)
+                st.metric("🎓 Semantic Scholar", semantic_count)
+            with col2:
+                google_count = source_counts.get('Google Scholar', 0)
+                st.metric("📚 Google Scholar", google_count)
+            with col3:
+                st.metric("📊 重複除去後", len(results))
+        
+        if results:
             col1, col2 = st.columns([1, 1])
             with col1:
                 if st.button("💾 全ての結果を保存", type="secondary"):
@@ -555,7 +730,7 @@ def main():
             with col2:
                 if st.session_state.saved_papers:
                     download_format = st.selectbox(
-                        "The Download Format",
+                        "ダウンロード形式",
                         ["CSV", "BibTeX"],
                         key="download_format_main"
                     )
@@ -600,23 +775,25 @@ def main():
     
     else:
         # 初期表示：システム説明
-        st.markdown("## 🎯 システムについて")
+        st.markdown("## 🎯 EduStudyについて")
         
         col1, col2 = st.columns(2)
         
         with col1:
             st.markdown("""
             ### 🔍 検索機能
-            - **リアルタイム検索**: Semantic Scholar APIを使用
+            - **複数データソース**: Semantic Scholar + Google Scholar
             - **多言語対応**: 日本語・英語での検索が可能
             - **教育特化**: 教育関係の論文に特化したフィルタリング
             - **ハイライト表示**: 検索語を結果内でハイライト
+            - **重複除去**: 複数ソースからの重複論文を自動除去
             """)
             
         with col2:
             st.markdown("""
             ### 📊 データベース
-            - **200M+ 論文**: 世界最大級の学術論文データベース
+            - **Semantic Scholar**: 200M+ 学術論文データベース
+            - **Google Scholar**: Googleの学術検索エンジン
             - **リアルタイム更新**: 最新の研究成果を即座に検索
             - **引用情報**: 論文の影響度を引用数で確認
             - **直接リンク**: 論文の原文へ直接アクセス可能
@@ -637,9 +814,9 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: gray; font-size: 0.8em; padding: 2rem;'>
-        <p>📚 EduStudy: 教育関係学会誌論文検索システム</p>
-        <p>Powered by Semantic Scholar API | データは定期的に更新されます</p>
-        <p>研究者の学術活動を支援します</p>
+        <p>🎓 EduStudy - 教育論文検索システム</p>
+        <p>Powered by Semantic Scholar API & Google Scholar | データは定期的に更新されます</p>
+        <p>🔬 研究者の皆様の学術活動を支援します</p>
     </div>
     """, unsafe_allow_html=True)
 
