@@ -525,7 +525,7 @@ def main():
         result_limit = st.slider(
             "各データソースからの検索結果数",
             min_value=5,
-            max_value=25,
+            max_value=100,
             value=10,
             step=5
         )
@@ -534,9 +534,9 @@ def main():
         current_year = datetime.now().year
         year_range = st.slider(
             "発行年度範囲",
-            min_value=2000,
+            min_value=1950,
             max_value=current_year,
-            value=(2020, current_year),
+            value=(2025, current_year),
             step=1
         )
         
