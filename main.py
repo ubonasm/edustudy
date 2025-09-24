@@ -9,6 +9,8 @@ def search_papers_api(query, limit=20):
     if not query:
         return []
     
+    time.sleep(1)  # APIリクエスト間に1秒待機
+    
     # Semantic Scholar API endpoint
     base_url = "https://api.semanticscholar.org/graph/v1/paper/search"
     
@@ -22,52 +24,80 @@ def search_papers_api(query, limit=20):
         'fields': 'paperId,title,authors,year,abstract,venue,citationCount,publicationDate,url'
     }
     
-    try:
-        response = requests.get(base_url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        papers = []
-        for paper in data.get('data', []):
-            # 教育関係の論文をフィルタリング
-            title = paper.get('title') or ''
-            abstract = paper.get('abstract') or ''
-            title_abstract = (title + ' ' + abstract).lower()
-            education_terms = ['education', 'learning', 'teaching', 'student', 'school', 'classroom', 'pedagogy', 'curriculum', 'instruction']
-            
-            if any(term in title_abstract for term in education_terms):
-                authors_list = paper.get('authors', [])
-                if authors_list:
-                    authors_names = []
-                    for author in authors_list:
-                        if author and isinstance(author, dict):
-                            name = author.get('name')
-                            if name:
-                                authors_names.append(str(name))
-                    authors_str = ', '.join(authors_names) if authors_names else '著者不明'
-                else:
-                    authors_str = '著者不明'
-                
-                processed_paper = {
-                    'title': str(title) if title else 'タイトル不明',
-                    'authors': authors_str,
-                    'year': paper.get('year') if paper.get('year') is not None else '年度不明',
-                    'abstract': str(abstract) if abstract else '抄録なし',
-                    'venue': str(paper.get('venue')) if paper.get('venue') else '掲載誌不明',
-                    'citation_count': paper.get('citationCount', 0) or 0,
-                    'url': str(paper.get('url')) if paper.get('url') else '',
-                    'publication_date': str(paper.get('publicationDate')) if paper.get('publicationDate') else ''
-                }
-                papers.append(processed_paper)
-        
-        return papers
+    max_retries = 3
+    retry_delay = 2
     
-    except requests.exceptions.RequestException as e:
-        st.error(f"API接続エラー: {str(e)}")
-        return []
-    except Exception as e:
-        st.error(f"検索エラー: {str(e)}")
-        return []
+    for attempt in range(max_retries):
+        try:
+            headers = {
+                'User-Agent': 'Academic Paper Search Tool (educational use)',
+                'Accept': 'application/json'
+            }
+            
+            response = requests.get(base_url, params=params, headers=headers, timeout=15)
+            
+            if response.status_code == 429:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # 指数バックオフ
+                    st.warning(f"API制限に達しました。{wait_time}秒後にリトライします... (試行 {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    st.error("API制限により検索できませんでした。しばらく時間をおいてから再度お試しください。")
+                    return []
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            papers = []
+            for paper in data.get('data', []):
+                # 教育関係の論文をフィルタリング
+                title = paper.get('title') or ''
+                abstract = paper.get('abstract') or ''
+                title_abstract = (title + ' ' + abstract).lower()
+                education_terms = ['education', 'learning', 'teaching', 'student', 'school', 'classroom', 'pedagogy', 'curriculum', 'instruction']
+                
+                if any(term in title_abstract for term in education_terms):
+                    authors_list = paper.get('authors', [])
+                    if authors_list:
+                        authors_names = []
+                        for author in authors_list:
+                            if author and isinstance(author, dict):
+                                name = author.get('name')
+                                if name:
+                                    authors_names.append(str(name))
+                        authors_str = ', '.join(authors_names) if authors_names else '著者不明'
+                    else:
+                        authors_str = '著者不明'
+                    
+                    processed_paper = {
+                        'title': str(title) if title else 'タイトル不明',
+                        'authors': authors_str,
+                        'year': paper.get('year') if paper.get('year') is not None else '年度不明',
+                        'abstract': str(abstract) if abstract else '抄録なし',
+                        'venue': str(paper.get('venue')) if paper.get('venue') else '掲載誌不明',
+                        'citation_count': paper.get('citationCount', 0) or 0,
+                        'url': str(paper.get('url')) if paper.get('url') else '',
+                        'publication_date': str(paper.get('publicationDate')) if paper.get('publicationDate') else ''
+                    }
+                    papers.append(processed_paper)
+            
+            return papers
+        
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                st.warning(f"接続エラーが発生しました。{retry_delay}秒後にリトライします... (試行 {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+                continue
+            else:
+                st.error(f"API接続エラー: {str(e)}")
+                st.info("💡 解決方法: しばらく時間をおいてから再度検索してください。または検索語を変更してみてください。")
+                return []
+        except Exception as e:
+            st.error(f"検索エラー: {str(e)}")
+            return []
+    
+    return []
 
 def highlight_text(text, search_terms):
     """検索語をハイライトする関数"""
