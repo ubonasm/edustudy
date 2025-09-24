@@ -637,9 +637,9 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: gray; font-size: 0.8em; padding: 2rem;'>
-        <p>📚 教育関係学会誌論文検索システム</p>
+        <p>📚 EduStudy: 教育関係学会誌論文検索システム</p>
         <p>Powered by Semantic Scholar API | データは定期的に更新されます</p>
-        <p>🔬 研究者の皆様の学術活動を支援します</p>
+        <p>研究者の学術活動を支援します</p>
     </div>
     """, unsafe_allow_html=True)
 
