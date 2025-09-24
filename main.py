@@ -3,6 +3,8 @@ import requests
 import re
 from datetime import datetime
 import time
+import csv
+import io
 
 def search_papers_api(query, limit=20):
     """Semantic Scholar APIを使用して論文を検索する関数"""
@@ -123,12 +125,103 @@ def highlight_text(text, search_terms):
     
     return highlighted_text
 
-def display_paper(paper, search_query, index):
-    """論文情報を表示する関数"""
+def format_apa_citation(paper):
+    """APA ver.7形式で引用文献を作成する関数"""
+    authors = paper.get('authors', '著者不明')
+    year = paper.get('year', '年度不明')
+    title = paper.get('title', 'タイトル不明')
+    venue = paper.get('venue', '掲載誌不明')
+    url = paper.get('url', '')
+    
+    # 著者名の処理（APA形式: Last, F. M.）
+    if authors != '著者不明':
+        # 簡略化：実際のAPA形式では姓名の順序変更が必要
+        author_formatted = authors
+    else:
+        author_formatted = '著者不明'
+    
+    # 年度の処理
+    year_formatted = f"({year})" if year != '年度不明' else "(年度不明)"
+    
+    # タイトルの処理（APA形式では文の最初の単語のみ大文字）
+    title_formatted = title
+    
+    # 掲載誌の処理（イタリック体を示すため*で囲む）
+    venue_formatted = f"*{venue}*" if venue != '掲載誌不明' else "*掲載誌不明*"
+    
+    # URL処理
+    url_formatted = f" {url}" if url else ""
+    
+    # APA形式の引用文献作成
+    citation = f"{author_formatted} {year_formatted}. {title_formatted}. {venue_formatted}.{url_formatted}"
+    
+    return citation
+
+def create_csv_data(papers, search_query):
+    """検索結果をCSV形式のデータに変換する関数"""
+    csv_data = []
+    
+    # ヘッダー行
+    headers = [
+        'No.', 'タイトル', '著者', '年度', '掲載誌', '引用数', 
+        '抄録', 'URL', 'APA引用形式', '検索語', '検索日時'
+    ]
+    csv_data.append(headers)
+    
+    # データ行
+    search_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    for i, paper in enumerate(papers, 1):
+        row = [
+            i,
+            paper.get('title', 'タイトル不明'),
+            paper.get('authors', '著者不明'),
+            paper.get('year', '年度不明'),
+            paper.get('venue', '掲載誌不明'),
+            paper.get('citation_count', 0),
+            paper.get('abstract', '抄録なし'),
+            paper.get('url', ''),
+            format_apa_citation(paper),
+            search_query,
+            search_datetime
+        ]
+        csv_data.append(row)
+    
+    return csv_data
+
+def create_csv_download(papers, search_query):
+    """CSVダウンロード用のデータを作成する関数"""
+    csv_data = create_csv_data(papers, search_query)
+    
+    # StringIOを使用してCSVデータを作成
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerows(csv_data)
+    
+    return output.getvalue()
+
+def display_paper_with_save(paper, search_query, index):
+    """論文情報を保存ボタン付きで表示する関数"""
     with st.container():
         title = str(paper.get('title', 'タイトル不明'))
         highlighted_title = highlight_text(title, search_query)
-        st.markdown(f"### {index}. {highlighted_title}", unsafe_allow_html=True)
+        
+        # タイトルと保存ボタンを同じ行に配置
+        col1, col2 = st.columns([5, 1])
+        with col1:
+            st.markdown(f"### {index}. {highlighted_title}", unsafe_allow_html=True)
+        with col2:
+            # 個別保存ボタン
+            save_key = f"save_{index}_{hash(title)}"
+            if st.button("💾", key=save_key, help="この論文を保存"):
+                # 重複チェック
+                existing_titles = [p.get('title') for p in st.session_state.saved_papers]
+                if title not in existing_titles:
+                    st.session_state.saved_papers.append(paper)
+                    st.success("論文を保存しました！")
+                    st.rerun()
+                else:
+                    st.warning("この論文は既に保存されています")
         
         # 著者情報と年度
         col1, col2, col3 = st.columns([3, 1, 1])
@@ -146,6 +239,11 @@ def display_paper(paper, search_query, index):
         venue = paper.get('venue')
         if venue and venue != '掲載誌不明':
             st.markdown(f"**掲載誌:** {str(venue)}")
+        
+        # APA引用形式を表示
+        apa_citation = format_apa_citation(paper)
+        with st.expander("📝 APA引用形式"):
+            st.code(apa_citation, language="text")
         
         # 抄録（ハイライト付き）
         abstract = paper.get('abstract')
@@ -200,6 +298,12 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
+    # セッション状態の初期化
+    if 'saved_papers' not in st.session_state:
+        st.session_state.saved_papers = []
+    if 'last_search_query' not in st.session_state:
+        st.session_state.last_search_query = ""
+    
     # ヘッダー
     st.markdown("""
     <div class="main-header">
@@ -232,6 +336,47 @@ def main():
         )
         
         st.markdown("---")
+        
+        st.header("💾 保存された論文")
+        
+        if st.session_state.saved_papers:
+            st.success(f"保存済み: {len(st.session_state.saved_papers)}件")
+            
+            # CSVダウンロードボタン
+            if st.button("📥 CSV形式でダウンロード", use_container_width=True):
+                csv_content = create_csv_download(
+                    st.session_state.saved_papers, 
+                    st.session_state.last_search_query
+                )
+                
+                filename = f"論文検索結果_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                
+                st.download_button(
+                    label="📄 CSVファイルをダウンロード",
+                    data=csv_content,
+                    file_name=filename,
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            
+            # 保存リストをクリア
+            if st.button("🗑️ 保存リストをクリア", use_container_width=True):
+                st.session_state.saved_papers = []
+                st.success("保存リストをクリアしました")
+                st.rerun()
+            
+            # 保存された論文の一覧表示
+            with st.expander("📋 保存された論文一覧"):
+                for i, paper in enumerate(st.session_state.saved_papers, 1):
+                    st.write(f"{i}. {paper.get('title', 'タイトル不明')}")
+                    st.write(f"   著者: {paper.get('authors', '著者不明')}")
+                    st.write(f"   年度: {paper.get('year', '年度不明')}")
+                    st.write("---")
+        else:
+            st.info("保存された論文はありません")
+        
+        st.markdown("---")
+        
         st.markdown("**💡 検索のヒント:**")
         st.markdown("- 日本語または英語で検索可能")
         st.markdown("- 複数のキーワードをスペースで区切って入力")
@@ -263,6 +408,9 @@ def main():
     
     # 検索実行
     if search_query and (search_button or search_query):
+        # 検索クエリを保存
+        st.session_state.last_search_query = search_query
+        
         with st.spinner("🔍 論文を検索中..."):
             # プログレスバー表示
             progress_bar = st.progress(0)
@@ -295,28 +443,40 @@ def main():
         st.markdown(f"## 📊 検索結果: {len(results)}件")
         
         if results:
-            # 結果の統計情報
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2 = st.columns([1, 1])
             with col1:
-                st.metric("📄 検索結果数", len(results))
+                if st.button("💾 全ての結果を保存", type="secondary"):
+                    # 重複を避けて保存
+                    new_papers = []
+                    existing_titles = [p.get('title') for p in st.session_state.saved_papers]
+                    
+                    for paper in results:
+                        if paper.get('title') not in existing_titles:
+                            new_papers.append(paper)
+                    
+                    st.session_state.saved_papers.extend(new_papers)
+                    st.success(f"{len(new_papers)}件の新しい論文を保存しました")
+                    st.rerun()
+            
             with col2:
-                result_years = [paper['year'] for paper in results if isinstance(paper['year'], int)]
-                st.metric("📅 最新年度", max(result_years) if result_years else "N/A")
-            with col3:
-                total_citations = sum([paper['citation_count'] for paper in results])
-                st.metric("📈 総引用数", total_citations)
-            with col4:
-                unique_venues = len(set([paper['venue'] for paper in results if paper['venue']]))
-                st.metric("📚 関連学会誌数", unique_venues)
-            
-            st.markdown("---")
-            
-            # 引用数でソート
-            sorted_results = sorted(results, key=lambda x: x['citation_count'], reverse=True)
+                if st.session_state.saved_papers:
+                    csv_content = create_csv_download(
+                        st.session_state.saved_papers, 
+                        search_query
+                    )
+                    filename = f"論文検索結果_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                    
+                    st.download_button(
+                        label="📥 保存済み論文をCSVダウンロード",
+                        data=csv_content,
+                        file_name=filename,
+                        mime="text/csv",
+                        type="primary"
+                    )
             
             # 各論文の表示
-            for i, paper in enumerate(sorted_results, 1):
-                display_paper(paper, search_query, i)
+            for i, paper in enumerate(results, 1):
+                display_paper_with_save(paper, search_query, i)
                 
         else:
             st.warning("🔍 検索条件に一致する論文が見つかりませんでした。")
