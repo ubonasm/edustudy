@@ -118,52 +118,79 @@ def search_google_scholar(query, limit=10):
     
     papers = []
     try:
-        # Google Scholar検索を実行
-        search_query = scholarly.search_pubs(query)
+        # プロキシ設定やUser-Agent設定を追加
+        from scholarly import scholarly
         
-        count = 0
-        for paper in search_query:
-            if count >= limit:
-                break
+        # 検索設定を調整
+        try:
+            # Google Scholar検索を実行（タイムアウト設定）
+            search_query = scholarly.search_pubs(query)
             
-            try:
-                # 論文情報を取得
-                title = paper.get('title', 'タイトル不明')
-                authors = ', '.join([author['name'] for author in paper.get('author', [])]) if paper.get('author') else '著者不明'
-                year = paper.get('year', '年度不明')
-                abstract = paper.get('abstract', '抄録なし')
-                venue = paper.get('venue', '掲載誌不明')
-                citation_count = paper.get('num_citations', 0)
-                url = paper.get('pub_url', '')
+            count = 0
+            timeout_count = 0
+            max_timeout = 3  # 最大3回のタイムアウトまで許容
+            
+            for paper in search_query:
+                if count >= limit:
+                    break
                 
-                # 教育関係の論文をフィルタリング
-                title_abstract = (str(title) + ' ' + str(abstract)).lower()
-                education_terms = ['education', 'learning', 'teaching', 'student', 'school', 'classroom', 'pedagogy', 'curriculum', 'instruction']
+                if timeout_count >= max_timeout:
+                    st.warning("Google Scholar検索でタイムアウトが多発しています。Semantic Scholar検索結果のみ表示します。")
+                    break
                 
-                if any(term in title_abstract for term in education_terms):
-                    processed_paper = {
-                        'title': str(title) if title else 'タイトル不明',
-                        'authors': str(authors) if authors else '著者不明',
-                        'year': int(year) if str(year).isdigit() else '年度不明',
-                        'abstract': str(abstract) if abstract else '抄録なし',
-                        'venue': str(venue) if venue else '掲載誌不明',
-                        'citation_count': int(citation_count) if citation_count else 0,
-                        'url': str(url) if url else '',
-                        'publication_date': '',
-                        'source': 'Google Scholar'  # データソースを追加
-                    }
-                    papers.append(processed_paper)
-                    count += 1
+                try:
+                    # 論文情報を取得（タイムアウト対策）
+                    title = paper.get('title', 'タイトル不明')
+                    authors = ', '.join([author['name'] for author in paper.get('author', [])]) if paper.get('author') else '著者不明'
+                    year = paper.get('year', '年度不明')
+                    abstract = paper.get('abstract', '抄録なし')
+                    venue = paper.get('venue', '掲載誌不明')
+                    citation_count = paper.get('num_citations', 0)
+                    url = paper.get('pub_url', '')
+                    
+                    # 教育関係の論文をフィルタリング
+                    title_abstract = (str(title) + ' ' + str(abstract)).lower()
+                    education_terms = ['education', 'learning', 'teaching', 'student', 'school', 'classroom', 'pedagogy', 'curriculum', 'instruction']
+                    
+                    if any(term in title_abstract for term in education_terms):
+                        processed_paper = {
+                            'title': str(title) if title else 'タイトル不明',
+                            'authors': str(authors) if authors else '著者不明',
+                            'year': int(year) if str(year).isdigit() else '年度不明',
+                            'abstract': str(abstract) if abstract else '抄録なし',
+                            'venue': str(venue) if venue else '掲載誌不明',
+                            'citation_count': int(citation_count) if citation_count else 0,
+                            'url': str(url) if url else '',
+                            'publication_date': '',
+                            'source': 'Google Scholar'
+                        }
+                        papers.append(processed_paper)
+                        count += 1
+                    
+                    # レート制限対策（より長い待機時間）
+                    time.sleep(3)
+                    
+                except Exception as e:
+                    timeout_count += 1
+                    st.warning(f"Google Scholar論文処理中にエラーが発生しました（{timeout_count}/{max_timeout}）")
+                    time.sleep(5)  # エラー時はより長く待機
+                    continue
+                    
+        except Exception as e:
+            # Google Scholar接続エラーの詳細なハンドリング
+            error_msg = str(e).lower()
+            if "cannot fetch" in error_msg or "blocked" in error_msg:
+                st.warning("⚠️ Google Scholarからの検索が一時的に制限されています。Semantic Scholar検索結果のみ表示します。")
+                st.info("💡 しばらく時間をおいてから再度お試しください。または検索語を変更してみてください。")
+            else:
+                st.warning(f"Google Scholar検索でエラーが発生しました: {str(e)}")
+            return []
                 
-                # レート制限対策
-                time.sleep(2)
-                
-            except Exception as e:
-                st.warning(f"Google Scholar論文処理エラー: {str(e)}")
-                continue
-                
+    except ImportError:
+        st.warning("Google Scholar検索は利用できません（scholarlyライブラリが必要）")
+        return []
     except Exception as e:
-        st.error(f"Google Scholar検索エラー: {str(e)}")
+        st.error(f"Google Scholar検索で予期しないエラーが発生しました: {str(e)}")
         return []
     
     return papers
@@ -321,8 +348,8 @@ def create_csv_data(papers, search_query):
     
     # ヘッダー行
     headers = [
-        'No.', 'title', 'author', 'year', 'journal', 'cites', 
-        'abstract', 'URL', 'APA style', 'search words', 'search date', 'data sources'
+        'No.', 'タイトル', '著者', '年度', '掲載誌', '引用数', 
+        '抄録', 'URL', 'APA引用形式', '検索語', '検索日時', 'データソース'
     ]
     csv_data.append(headers)
     
@@ -514,18 +541,27 @@ def main():
         
         st.subheader("📊 データソース")
         use_semantic = st.checkbox("Semantic Scholar", value=True, help="200M+の学術論文データベース")
-        use_google = st.checkbox("Google Scholar", value=GOOGLE_SCHOLAR_AVAILABLE, 
+        
+        google_help_text = "Googleの学術検索エンジン"
+        if not GOOGLE_SCHOLAR_AVAILABLE:
+            google_help_text += " (要scholarly)"
+        else:
+            google_help_text += " (制限により利用できない場合があります)"
+            
+        use_google = st.checkbox("Google Scholar", value=False,  # デフォルトをFalseに変更
                                 disabled=not GOOGLE_SCHOLAR_AVAILABLE,
-                                help="Googleの学術検索エンジン" + ("" if GOOGLE_SCHOLAR_AVAILABLE else " (要scholarly)"))
+                                help=google_help_text)
         
         if not GOOGLE_SCHOLAR_AVAILABLE:
             st.info("💡 Google Scholar検索を有効にするには `pip install scholarly` を実行してください")
-        
+        else:
+            st.info("⚠️ Google Scholar検索は制限により失敗する場合があります。安定した検索にはSemantic Scholarをご利用ください。")
+
         # 検索結果数の設定
         result_limit = st.slider(
             "各データソースからの検索結果数",
             min_value=5,
-            max_value=100,
+            max_value=25,
             value=10,
             step=5
         )
@@ -534,9 +570,9 @@ def main():
         current_year = datetime.now().year
         year_range = st.slider(
             "発行年度範囲",
-            min_value=1950,
+            min_value=2000,
             max_value=current_year,
-            value=(2025, current_year),
+            value=(2020, current_year),
             step=1
         )
         
@@ -628,7 +664,7 @@ def main():
     
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # 検索実行
+    # 検索実行部分
     if search_query and (search_button or search_query):
         # データソースチェック
         if not use_semantic and not (use_google and GOOGLE_SCHOLAR_AVAILABLE):
@@ -653,16 +689,21 @@ def main():
                     paper['source'] = 'Semantic Scholar'
                 results.extend(semantic_results)
                 progress_bar.progress(50)
-            
+                
             if use_google and GOOGLE_SCHOLAR_AVAILABLE:
                 status_text.text("Google Scholarに接続中...")
                 progress_bar.progress(75)
                 try:
                     google_results = search_google_scholar(search_query, result_limit)
-                    results.extend(google_results)
+                    if google_results:
+                        results.extend(google_results)
+                        st.success(f"Google Scholarから {len(google_results)} 件の論文を取得しました")
+                    else:
+                        st.info("Google Scholar検索では結果が取得できませんでした。Semantic Scholar検索結果のみ表示します。")
                 except Exception as e:
-                    st.warning(f"Google Scholar検索でエラーが発生しました: {str(e)}")
-            
+                    st.warning("Google Scholar検索が利用できません。Semantic Scholar検索結果のみ表示します。")
+                    st.info("💡 より安定した検索結果を得るには、Semantic Scholarのみをご利用ください。")
+
             # 重複除去とソート
             seen_titles = set()
             unique_results = []
