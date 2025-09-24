@@ -163,8 +163,8 @@ def create_csv_data(papers, search_query):
     
     # ヘッダー行
     headers = [
-        'No.', 'タイトル', '著者', '年度', '掲載誌', '引用数', 
-        '抄録', 'URL', 'APA引用形式', '検索語', '検索日時'
+        'No.', 'title', 'author', 'year', 'journal', 'cites', 
+        'abstract', 'URL', 'APA style', 'search words', 'search date'
     ]
     csv_data.append(headers)
     
@@ -267,7 +267,7 @@ def display_paper_with_save(paper, search_query, index):
 def main():
     # ページ設定
     st.set_page_config(
-        page_title="教育関係学会誌論文検索システム",
+        page_title="EduStudy: The Search System for Educational Journal",
         page_icon="📚",
         layout="wide"
     )
@@ -307,21 +307,21 @@ def main():
     # ヘッダー
     st.markdown("""
     <div class="main-header">
-        <h1>📚 教育関係学会誌論文検索システム</h1>
-        <p>世界中の教育関係論文をリアルタイムで検索できます。Semantic Scholar APIを使用して最新の研究成果を提供します。</p>
+        <h1>📚 EduStudy</h1>
+        <p>Using this system, you can search educational research papers worldwide in real time</p>
     </div>
     """, unsafe_allow_html=True)
     
     # サイドバー
     with st.sidebar:
-        st.header("🔍 検索オプション")
+        st.header("🔍 option")
         
         # 検索結果数の設定
         result_limit = st.slider(
             "検索結果数",
             min_value=5,
-            max_value=50,
-            value=20,
+            max_value=100,
+            value=25,
             step=5
         )
         
@@ -329,9 +329,9 @@ def main():
         current_year = datetime.now().year
         year_range = st.slider(
             "発行年度範囲",
-            min_value=2000,
+            min_value=1950,
             max_value=current_year,
-            value=(2020, current_year),
+            value=(2025, current_year),
             step=1
         )
         
@@ -343,13 +343,13 @@ def main():
             st.success(f"保存済み: {len(st.session_state.saved_papers)}件")
             
             # CSVダウンロードボタン
-            if st.button("📥 CSV形式でダウンロード", use_container_width=True):
+            if st.button("📥 download the CSV file", use_container_width=True):
                 csv_content = create_csv_download(
                     st.session_state.saved_papers, 
                     st.session_state.last_search_query
                 )
                 
-                filename = f"論文検索結果_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                filename = f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
                 
                 st.download_button(
                     label="📄 CSVファイルをダウンロード",
