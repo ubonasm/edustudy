@@ -30,19 +30,33 @@ def search_papers_api(query, limit=20):
         papers = []
         for paper in data.get('data', []):
             # 教育関係の論文をフィルタリング
-            title_abstract = (paper.get('title', '') + ' ' + paper.get('abstract', '')).lower()
+            title = paper.get('title') or ''
+            abstract = paper.get('abstract') or ''
+            title_abstract = (title + ' ' + abstract).lower()
             education_terms = ['education', 'learning', 'teaching', 'student', 'school', 'classroom', 'pedagogy', 'curriculum', 'instruction']
             
             if any(term in title_abstract for term in education_terms):
+                authors_list = paper.get('authors', [])
+                if authors_list:
+                    authors_names = []
+                    for author in authors_list:
+                        if author and isinstance(author, dict):
+                            name = author.get('name')
+                            if name:
+                                authors_names.append(str(name))
+                    authors_str = ', '.join(authors_names) if authors_names else '著者不明'
+                else:
+                    authors_str = '著者不明'
+                
                 processed_paper = {
-                    'title': paper.get('title', 'タイトル不明'),
-                    'authors': ', '.join([author.get('name', '') for author in paper.get('authors', [])]) or '著者不明',
-                    'year': paper.get('year', '年度不明'),
-                    'abstract': paper.get('abstract', '抄録なし'),
-                    'venue': paper.get('venue', '掲載誌不明'),
-                    'citation_count': paper.get('citationCount', 0),
-                    'url': paper.get('url', ''),
-                    'publication_date': paper.get('publicationDate', '')
+                    'title': str(title) if title else 'タイトル不明',
+                    'authors': authors_str,
+                    'year': paper.get('year') if paper.get('year') is not None else '年度不明',
+                    'abstract': str(abstract) if abstract else '抄録なし',
+                    'venue': str(paper.get('venue')) if paper.get('venue') else '掲載誌不明',
+                    'citation_count': paper.get('citationCount', 0) or 0,
+                    'url': str(paper.get('url')) if paper.get('url') else '',
+                    'publication_date': str(paper.get('publicationDate')) if paper.get('publicationDate') else ''
                 }
                 papers.append(processed_paper)
         
@@ -57,55 +71,68 @@ def search_papers_api(query, limit=20):
 
 def highlight_text(text, search_terms):
     """検索語をハイライトする関数"""
-    if not search_terms or not text:
-        return text
+    if not search_terms or not text or text == 'None':
+        return str(text) if text else ''
+    
+    # 文字列に変換して安全に処理
+    text = str(text)
+    search_terms = str(search_terms)
     
     # 複数の検索語に対応
     terms = [term.strip() for term in search_terms.split() if term.strip()]
     highlighted_text = text
     
     for term in terms:
-        # 大文字小文字を区別しない検索
-        pattern = re.compile(re.escape(term), re.IGNORECASE)
-        highlighted_text = pattern.sub(
-            f'<mark style="background-color: #ffeb3b; padding: 2px 4px; border-radius: 3px; font-weight: bold;">{term}</mark>',
-            highlighted_text
-        )
+        if term:  # 空文字列チェック
+            # 大文字小文字を区別しない検索
+            pattern = re.compile(re.escape(term), re.IGNORECASE)
+            highlighted_text = pattern.sub(
+                f'<mark style="background-color: #ffeb3b; padding: 2px 4px; border-radius: 3px; font-weight: bold;">{term}</mark>',
+                highlighted_text
+            )
     
     return highlighted_text
 
 def display_paper(paper, search_query, index):
     """論文情報を表示する関数"""
     with st.container():
-        # 論文番号とタイトル（ハイライト付き）
-        highlighted_title = highlight_text(paper['title'], search_query)
+        title = str(paper.get('title', 'タイトル不明'))
+        highlighted_title = highlight_text(title, search_query)
         st.markdown(f"### {index}. {highlighted_title}", unsafe_allow_html=True)
         
         # 著者情報と年度
         col1, col2, col3 = st.columns([3, 1, 1])
         with col1:
-            st.markdown(f"**著者:** {paper['authors']}")
+            authors = str(paper.get('authors', '著者不明'))
+            st.markdown(f"**著者:** {authors}")
         with col2:
-            st.markdown(f"**年度:** {paper['year']}")
+            year = paper.get('year', '年度不明')
+            st.markdown(f"**年度:** {year}")
         with col3:
-            st.markdown(f"**引用数:** {paper['citation_count']}")
+            citation_count = paper.get('citation_count', 0)
+            st.markdown(f"**引用数:** {citation_count}")
         
         # 掲載誌情報
-        if paper['venue']:
-            st.markdown(f"**掲載誌:** {paper['venue']}")
+        venue = paper.get('venue')
+        if venue and venue != '掲載誌不明':
+            st.markdown(f"**掲載誌:** {str(venue)}")
         
         # 抄録（ハイライト付き）
-        if paper['abstract'] and paper['abstract'] != '抄録なし':
-            highlighted_abstract = highlight_text(paper['abstract'], search_query)
+        abstract = paper.get('abstract')
+        if abstract and abstract != '抄録なし' and abstract != 'None':
+            abstract_str = str(abstract)
             # 抄録を適切な長さに制限
-            if len(paper['abstract']) > 300:
-                truncated_abstract = paper['abstract'][:300] + "..."
+            if len(abstract_str) > 300:
+                truncated_abstract = abstract_str[:300] + "..."
                 highlighted_abstract = highlight_text(truncated_abstract, search_query)
+            else:
+                highlighted_abstract = highlight_text(abstract_str, search_query)
             st.markdown(f"**抄録:** {highlighted_abstract}", unsafe_allow_html=True)
         
         # 論文リンク
-        if paper['url']:
-            st.markdown(f"[📄 論文を読む]({paper['url']})")
+        url = paper.get('url')
+        if url and url != '':
+            st.markdown(f"[📄 論文を読む]({url})")
         
         st.markdown("---")
 
