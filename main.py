@@ -267,7 +267,7 @@ def search_combined(query, limit_per_source=10):
     return unique_papers
 
 def highlight_text(text, search_terms):
-    """検索語をハイライトする関数（引用符対応）"""
+    """検索語をハイライトする関数（完全一致：黄色、部分一致：水色）"""
     if not search_terms or not text or text == 'None':
         return str(text) if text else ''
     
@@ -287,21 +287,19 @@ def highlight_text(text, search_terms):
     
     highlighted_text = text
     
-    # 引用符で囲まれた語句を完全一致でハイライト
     for phrase in quoted_phrases:
         if phrase.strip():
             pattern = re.compile(re.escape(phrase.strip()), re.IGNORECASE)
             highlighted_text = pattern.sub(
-                f'<mark style="background-color: #ffeb3b; padding: 2px 4px; border-radius: 3px; font-weight: bold;">{phrase.strip()}</mark>',
+                f'<mark style="background-color: #ffeb3b; color: #000; padding: 2px 4px; border-radius: 3px; font-weight: bold;">{phrase.strip()}</mark>',
                 highlighted_text
             )
     
-    # 個別の単語をハイライト
     for word in individual_words:
         if word:
             pattern = re.compile(re.escape(word), re.IGNORECASE)
             highlighted_text = pattern.sub(
-                f'<mark style="background-color: #e1f5fe; padding: 2px 4px; border-radius: 3px; font-weight: bold;">{word}</mark>',
+                f'<mark style="background-color: #87ceeb; color: #000; padding: 2px 4px; border-radius: 3px; font-weight: bold;">{word}</mark>',
                 highlighted_text
             )
     
@@ -597,7 +595,7 @@ def main():
         result_limit = st.slider(
             "検索結果数",
             min_value=5,
-            max_value=100,
+            max_value=50,
             value=20,
             step=5
         )
@@ -606,7 +604,7 @@ def main():
         current_year = datetime.now().year
         year_range = st.slider(
             "発行年度範囲",
-            min_value=1950,
+            min_value=2000,
             max_value=current_year,
             value=(2020, current_year),
             step=1
@@ -683,7 +681,7 @@ def main():
     <div class="search-tip">
         <strong>🔍 検索のコツ:</strong><br>
         • <strong>完全一致検索:</strong> "Generative AI" のように引用符で囲むと、スペースを含む語句を完全一致で検索<br>
-        • <strong>複数キーワード:</strong> machine learning education のように複数の語を組み合わせ可能<br>
+        • <strong>複数キーワード:</strong> machine learning education のように複数の語をスペースで区切って入力可能<br>
         • <strong>日英対応:</strong> 日本語と英語の両方で検索できます
     </div>
     """, unsafe_allow_html=True)
