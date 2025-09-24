@@ -398,8 +398,8 @@ def create_csv_data(papers, search_query):
     
     # ヘッダー行
     headers = [
-        'No.', 'タイトル', '著者', '年度', '掲載誌', '引用数', 
-        '抄録', 'URL', 'APA引用形式', '検索語', '検索日時', 'データソース'
+        'No.', 'title', 'author', 'year', 'journal', 'cites', 
+        'abstract', 'URL', 'APA style', 'search words', 'search date', 'data source'
     ]
     csv_data.append(headers)
     
