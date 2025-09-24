@@ -12,6 +12,38 @@ try:
 except ImportError:
     GOOGLE_SCHOLAR_AVAILABLE = False
 
+def parse_search_query(query):
+    """検索クエリを解析して、引用符で囲まれた語句を完全一致として処理する関数"""
+    if not query:
+        return ""
+    
+    # 引用符で囲まれた語句を抽出
+    quoted_phrases = re.findall(r'"([^"]*)"', query)
+    
+    # 引用符で囲まれた語句を一時的に置換
+    temp_query = query
+    for i, phrase in enumerate(quoted_phrases):
+        temp_query = temp_query.replace(f'"{phrase}"', f'__QUOTED_{i}__')
+    
+    # 残りの単語を抽出
+    remaining_words = temp_query.split()
+    remaining_words = [word for word in remaining_words if not word.startswith('__QUOTED_')]
+    
+    # Semantic Scholar用のクエリを構築
+    query_parts = []
+    
+    # 引用符で囲まれた語句は完全一致として追加
+    for phrase in quoted_phrases:
+        if phrase.strip():
+            query_parts.append(f'"{phrase.strip()}"')
+    
+    # 残りの単語を追加
+    for word in remaining_words:
+        if word.strip():
+            query_parts.append(word.strip())
+    
+    return ' '.join(query_parts)
+
 def search_papers_api(query, limit=20):
     """Semantic Scholar APIを使用して論文を検索する関数"""
     if not query:
@@ -19,12 +51,15 @@ def search_papers_api(query, limit=20):
     
     time.sleep(1)  # APIリクエスト間に1秒待機
     
+    # 検索クエリを解析
+    processed_query = parse_search_query(query)
+    
     # Semantic Scholar API endpoint
     base_url = "https://api.semanticscholar.org/graph/v1/paper/search"
     
     # 教育関係のキーワードを追加して検索精度を向上
     education_keywords = ["education", "learning", "teaching", "pedagogy", "educational"]
-    enhanced_query = f"{query} {' OR '.join(education_keywords)}"
+    enhanced_query = f"{processed_query} ({' OR '.join(education_keywords)})"
     
     params = {
         'query': enhanced_query,
@@ -38,7 +73,7 @@ def search_papers_api(query, limit=20):
     for attempt in range(max_retries):
         try:
             headers = {
-                'User-Agent': 'Academic Paper Search Tool (educational use)',
+                'User-Agent': 'EduStudy Academic Paper Search Tool (educational use)',
                 'Accept': 'application/json'
             }
             
@@ -87,7 +122,7 @@ def search_papers_api(query, limit=20):
                         'citation_count': paper.get('citationCount', 0) or 0,
                         'url': str(paper.get('url')) if paper.get('url') else '',
                         'publication_date': str(paper.get('publicationDate')) if paper.get('publicationDate') else '',
-                        'source': 'Semantic Scholar'  # データソースを追加
+                        'source': 'Semantic Scholar'
                     }
                     papers.append(processed_paper)
             
@@ -232,7 +267,7 @@ def search_combined(query, limit_per_source=10):
     return unique_papers
 
 def highlight_text(text, search_terms):
-    """検索語をハイライトする関数"""
+    """検索語をハイライトする関数（引用符対応）"""
     if not search_terms or not text or text == 'None':
         return str(text) if text else ''
     
@@ -240,16 +275,33 @@ def highlight_text(text, search_terms):
     text = str(text)
     search_terms = str(search_terms)
     
-    # 複数の検索語に対応
-    terms = [term.strip() for term in search_terms.split() if term.strip()]
+    # 引用符で囲まれた語句を抽出
+    quoted_phrases = re.findall(r'"([^"]*)"', search_terms)
+    
+    # 引用符で囲まれていない単語を抽出
+    temp_terms = search_terms
+    for phrase in quoted_phrases:
+        temp_terms = temp_terms.replace(f'"{phrase}"', '')
+    
+    individual_words = [term.strip() for term in temp_terms.split() if term.strip()]
+    
     highlighted_text = text
     
-    for term in terms:
-        if term:  # 空文字列チェック
-            # 大文字小文字を区別しない検索
-            pattern = re.compile(re.escape(term), re.IGNORECASE)
+    # 引用符で囲まれた語句を完全一致でハイライト
+    for phrase in quoted_phrases:
+        if phrase.strip():
+            pattern = re.compile(re.escape(phrase.strip()), re.IGNORECASE)
             highlighted_text = pattern.sub(
-                f'<mark style="background-color: #ffeb3b; padding: 2px 4px; border-radius: 3px; font-weight: bold;">{term}</mark>',
+                f'<mark style="background-color: #ffeb3b; padding: 2px 4px; border-radius: 3px; font-weight: bold;">{phrase.strip()}</mark>',
+                highlighted_text
+            )
+    
+    # 個別の単語をハイライト
+    for word in individual_words:
+        if word:
+            pattern = re.compile(re.escape(word), re.IGNORECASE)
+            highlighted_text = pattern.sub(
+                f'<mark style="background-color: #e1f5fe; padding: 2px 4px; border-radius: 3px; font-weight: bold;">{word}</mark>',
                 highlighted_text
             )
     
@@ -396,7 +448,7 @@ def create_bibtex_data(papers):
     
     # BibTeX形式のファイルヘッダーを追加
     header = f"""% BibTeX bibliography file
-% Generated by Academic Paper Search Tool
+% Generated by EduStudy Academic Paper Search Tool
 % Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 % Total entries: {len(papers)}
 
@@ -510,13 +562,12 @@ def main():
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         margin-bottom: 1rem;
     }
-    .source-badge {
-        display: inline-block;
-        padding: 0.25rem 0.5rem;
-        background: #e3f2fd;
-        border-radius: 12px;
-        font-size: 0.8rem;
-        margin-left: 0.5rem;
+    .search-tip {
+        background: #e8f5e8;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #4caf50;
+        margin-bottom: 1rem;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -531,7 +582,7 @@ def main():
     st.markdown("""
     <div class="main-header">
         <h1>🎓 EduStudy - 教育論文検索システム</h1>
-        <p>世界中の教育関係論文をリアルタイムで検索できます。複数のデータベースから最新の研究成果を提供します。</p>
+        <p>世界中の教育関係論文をリアルタイムで検索できます。Semantic Scholar APIを使用して最新の研究成果を提供します。</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -540,29 +591,14 @@ def main():
         st.header("🔍 検索オプション")
         
         st.subheader("📊 データソース")
-        use_semantic = st.checkbox("Semantic Scholar", value=True, help="200M+の学術論文データベース")
+        st.info("🎓 Semantic Scholar API\n200M+の学術論文データベース")
         
-        google_help_text = "Googleの学術検索エンジン"
-        if not GOOGLE_SCHOLAR_AVAILABLE:
-            google_help_text += " (要scholarly)"
-        else:
-            google_help_text += " (制限により利用できない場合があります)"
-            
-        use_google = st.checkbox("Google Scholar", value=False,  # デフォルトをFalseに変更
-                                disabled=not GOOGLE_SCHOLAR_AVAILABLE,
-                                help=google_help_text)
-        
-        if not GOOGLE_SCHOLAR_AVAILABLE:
-            st.info("💡 Google Scholar検索を有効にするには `pip install scholarly` を実行してください")
-        else:
-            st.info("⚠️ Google Scholar検索は制限により失敗する場合があります。安定した検索にはSemantic Scholarをご利用ください。")
-
         # 検索結果数の設定
         result_limit = st.slider(
-            "各データソースからの検索結果数",
+            "検索結果数",
             min_value=5,
-            max_value=25,
-            value=10,
+            max_value=100,
+            value=20,
             step=5
         )
         
@@ -570,7 +606,7 @@ def main():
         current_year = datetime.now().year
         year_range = st.slider(
             "発行年度範囲",
-            min_value=2000,
+            min_value=1950,
             max_value=current_year,
             value=(2020, current_year),
             step=1
@@ -633,30 +669,32 @@ def main():
         st.markdown("---")
         
         st.markdown("**💡 検索のヒント:**")
-        st.markdown("- 日本語または英語で検索可能")
-        st.markdown("- 複数のキーワードをスペースで区切って入力")
-        st.markdown("- 教育関係の論文に特化して検索")
-        st.markdown("- 引用数の多い論文が上位に表示")
-        
-        st.markdown("---")
-        st.markdown("**📊 データソース:**")
-        if use_semantic:
-            st.markdown("- ✅ Semantic Scholar API")
-        if use_google and GOOGLE_SCHOLAR_AVAILABLE:
-            st.markdown("- ✅ Google Scholar")
-        if not use_semantic and not (use_google and GOOGLE_SCHOLAR_AVAILABLE):
-            st.markdown("- ❌ データソースが選択されていません")
+        st.markdown('- 引用符で囲むと完全一致: `"machine learning"`')
+        st.markdown("- 複数キーワード: `AI education deep learning`")
+        st.markdown("- 日英対応")
+        st.markdown("- 教育関係の論文に特化")
+        st.markdown("- 引用数の多い論文が上位表示")
     
     # メイン検索エリア
     st.markdown('<div class="search-box">', unsafe_allow_html=True)
+    
+    # 検索のヒント表示
+    st.markdown("""
+    <div class="search-tip">
+        <strong>🔍 検索のコツ:</strong><br>
+        • <strong>完全一致検索:</strong> "Generative AI" のように引用符で囲むと、スペースを含む語句を完全一致で検索<br>
+        • <strong>複数キーワード:</strong> machine learning education のように複数の語を組み合わせ可能<br>
+        • <strong>日英対応:</strong> 日本語と英語の両方で検索できます
+    </div>
+    """, unsafe_allow_html=True)
     
     col1, col2 = st.columns([4, 1])
     
     with col1:
         search_query = st.text_input(
             "🔍 検索語を入力してください",
-            placeholder="例: デジタル教材, collaborative learning, AI education",
-            help="日本語または英語で検索できます。複数のキーワードをスペースで区切って入力してください。"
+            placeholder='例: "collaborative learning", AI教育, デジタル教材',
+            help='引用符で囲むと完全一致検索。複数のキーワードをスペースで区切って入力可能。'
         )
     
     with col2:
@@ -666,11 +704,6 @@ def main():
     
     # 検索実行部分
     if search_query and (search_button or search_query):
-        # データソースチェック
-        if not use_semantic and not (use_google and GOOGLE_SCHOLAR_AVAILABLE):
-            st.error("❌ 検索するデータソースを選択してください")
-            return
-        
         # 検索クエリを保存
         st.session_state.last_search_query = search_query
         
@@ -679,43 +712,12 @@ def main():
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            results = []
+            status_text.text("Semantic Scholar APIに接続中...")
+            progress_bar.progress(25)
             
-            if use_semantic:
-                status_text.text("Semantic Scholar APIに接続中...")
-                progress_bar.progress(25)
-                semantic_results = search_papers_api(search_query, result_limit)
-                for paper in semantic_results:
-                    paper['source'] = 'Semantic Scholar'
-                results.extend(semantic_results)
-                progress_bar.progress(50)
-                
-            if use_google and GOOGLE_SCHOLAR_AVAILABLE:
-                status_text.text("Google Scholarに接続中...")
-                progress_bar.progress(75)
-                try:
-                    google_results = search_google_scholar(search_query, result_limit)
-                    if google_results:
-                        results.extend(google_results)
-                        st.success(f"Google Scholarから {len(google_results)} 件の論文を取得しました")
-                    else:
-                        st.info("Google Scholar検索では結果が取得できませんでした。Semantic Scholar検索結果のみ表示します。")
-                except Exception as e:
-                    st.warning("Google Scholar検索が利用できません。Semantic Scholar検索結果のみ表示します。")
-                    st.info("💡 より安定した検索結果を得るには、Semantic Scholarのみをご利用ください。")
-
-            # 重複除去とソート
-            seen_titles = set()
-            unique_results = []
-            for paper in results:
-                title_lower = paper.get('title', '').lower().strip()
-                if title_lower and title_lower not in seen_titles:
-                    seen_titles.add(title_lower)
-                    unique_results.append(paper)
+            results = search_papers_api(search_query, result_limit)
             
-            # 引用数でソート
-            unique_results.sort(key=lambda x: x.get('citation_count', 0), reverse=True)
-            results = unique_results
+            progress_bar.progress(75)
             
             # 年度フィルタリング
             if results:
@@ -737,20 +739,12 @@ def main():
         st.markdown(f"## 📊 検索結果: {len(results)}件")
         
         if results:
-            source_counts = {}
-            for paper in results:
-                source = paper.get('source', 'Unknown')
-                source_counts[source] = source_counts.get(source, 0) + 1
-            
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
-                semantic_count = source_counts.get('Semantic Scholar', 0)
-                st.metric("🎓 Semantic Scholar", semantic_count)
+                st.metric("🎓 Semantic Scholar", len(results))
             with col2:
-                google_count = source_counts.get('Google Scholar', 0)
-                st.metric("📚 Google Scholar", google_count)
-            with col3:
-                st.metric("📊 重複除去後", len(results))
+                avg_citations = sum(paper.get('citation_count', 0) for paper in results) / len(results)
+                st.metric("📈 平均引用数", f"{avg_citations:.1f}")
         
         if results:
             col1, col2 = st.columns([1, 1])
@@ -812,6 +806,7 @@ def main():
             - 英語のキーワードも試してみてください
             - キーワードの数を減らしてみてください
             - 年度範囲を広げてみてください
+            - 引用符を使った完全一致検索を試してみてください
             """)
     
     else:
@@ -823,21 +818,21 @@ def main():
         with col1:
             st.markdown("""
             ### 🔍 検索機能
-            - **複数データソース**: Semantic Scholar + Google Scholar
+            - **高精度検索**: Semantic Scholar APIによる200M+論文データベース
+            - **完全一致検索**: 引用符で囲んだ語句の完全一致検索
             - **多言語対応**: 日本語・英語での検索が可能
             - **教育特化**: 教育関係の論文に特化したフィルタリング
             - **ハイライト表示**: 検索語を結果内でハイライト
-            - **重複除去**: 複数ソースからの重複論文を自動除去
             """)
             
         with col2:
             st.markdown("""
-            ### 📊 データベース
-            - **Semantic Scholar**: 200M+ 学術論文データベース
-            - **Google Scholar**: Googleの学術検索エンジン
-            - **リアルタイム更新**: 最新の研究成果を即座に検索
-            - **引用情報**: 論文の影響度を引用数で確認
-            - **直接リンク**: 論文の原文へ直接アクセス可能
+            ### 📊 機能
+            - **論文保存**: 気になる論文を個別または一括保存
+            - **APA引用**: APA ver.7形式の引用文献を自動生成
+            - **BibTeX出力**: ZoteroやMendeleyで読み込み可能
+            - **CSV出力**: 検索結果をCSV形式でエクスポート
+            - **年度フィルタ**: 発行年度による絞り込み検索
             """)
         
         st.markdown("---")
@@ -845,10 +840,11 @@ def main():
         st.markdown("""
         ### 🚀 使い方
         1. **検索語入力**: 上の検索ボックスに関心のあるキーワードを入力
-        2. **オプション設定**: サイドバーで検索結果数や年度範囲を調整
-        3. **検索実行**: 「検索開始」ボタンをクリック
-        4. **結果確認**: ハイライト表示された検索結果を確認
-        5. **論文閲覧**: 気になる論文のリンクをクリックして原文を読む
+        2. **完全一致検索**: "machine learning"のように引用符で囲むと完全一致
+        3. **オプション設定**: サイドバーで検索結果数や年度範囲を調整
+        4. **検索実行**: 「検索開始」ボタンをクリック
+        5. **結果確認**: ハイライト表示された検索結果を確認
+        6. **論文保存**: 💾ボタンで論文を保存し、CSV/BibTeX形式でエクスポート
         """)
     
     # フッター
@@ -856,7 +852,7 @@ def main():
     st.markdown("""
     <div style='text-align: center; color: gray; font-size: 0.8em; padding: 2rem;'>
         <p>🎓 EduStudy - 教育論文検索システム</p>
-        <p>Powered by Semantic Scholar API & Google Scholar | データは定期的に更新されます</p>
+        <p>Powered by Semantic Scholar API | データは定期的に更新されます</p>
         <p>🔬 研究者の皆様の学術活動を支援します</p>
     </div>
     """, unsafe_allow_html=True)
